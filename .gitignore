@@ -1,3 +1,19 @@
+#custom-mjmj
+dataset/*
+
+__pycache__
+
+cifar_data/*
+dvs_cifar10_data/*
+
+*.pth
+*.log
+*pth.tar
+*.tar
+
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
