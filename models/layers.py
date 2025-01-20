@@ -61,7 +61,9 @@ class SeqToANNContainer(nn.Module):
 
     def forward(self, x_seq: torch.Tensor):
         y_shape = [x_seq.shape[0], x_seq.shape[1]]
+        print(x_seq.shape)
         y_seq = self.module(x_seq.flatten(0, 1).contiguous())
+        print("1+",y_seq.shape)
         y_shape.extend(y_seq.shape[1:])
         return y_seq.view(y_shape)
 

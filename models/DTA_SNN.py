@@ -4,7 +4,7 @@ from models.DTA import DTA
 
 
 class MS_ResNet(nn.Module):
-    def __init__(self, block, layers, num_classes=10, time_step=6, DTA_ON=True, dvs=None):
+    def __init__(self, block, layers, num_classes=11, time_step=2, DTA_ON=True, dvs=None):
         super(MS_ResNet, self).__init__()
         
         self.dvs = dvs     
@@ -158,7 +158,7 @@ class MS_ResNet_34(nn.Module):
     def _forward_impl(self, x):
         x = x.repeat(self.T, 1, 1, 1, 1).permute(1,0,2,3,4)
         # DTA ON or OFF
-        if self.GAC==True:
+        if self.DTA==True:
             x = self.conv1_s(x)
             img = x
             x = self.LIF(x)

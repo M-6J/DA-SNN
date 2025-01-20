@@ -6,27 +6,28 @@ from models.DTA_SNN import *
 from data.augmentations import *
 from data.loaders import build_cifar
 from utils.utils import *
-from spikingjelly.datasets import cifar10_dvs
+from spikingjelly.datasets import cifar10_dvs, dvs128_gesture
 import numpy as np
 import torch.nn as nn
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
-
-
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
+#torch.backends.cudnn.enabled = False
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+# device = torch.device('cuda:1' if not(args.cpu) and torch.cuda.is_available() else 'cpu')
+# # 将device换为cpu
+# device = torch.device('cpu')
 
 parser = argparse.ArgumentParser(description='Dual Temporal-channel-wise Attention for Spiking Neural Networks')
 
 
-parser.add_argument('--DTA_ON',
+parser.add_argument('--DTA',
                     default=True,
                     type=bool,
                     help='using DTA')
 parser.add_argument('--DS',
                     default='',
                     type=str,
-                    help='cifar10, cifar100, dvs_cifar10')
+                    help='cifar10, cifar100, dvs_gesture, dvs_cifar10')
 
 parser.add_argument('--start_epoch',
                     default=0,
@@ -35,12 +36,12 @@ parser.add_argument('--start_epoch',
                     help='manual epoch number')
 
 parser.add_argument('--batch_size',
-                    default=64,
+                    default=2,  # 이미지 전처리 trans부분 gesture에 맞춰 해야할듯하다
                     type=int,
                     metavar='N')
 
 parser.add_argument('--learning_rate',
-                    default=0.1,
+                    default=0.001,
                     type=float,
                     metavar='LR',
                     help='initial learning rate')
@@ -51,21 +52,22 @@ parser.add_argument('--seed',
                     help='seed for initializing training')
 
 parser.add_argument('--time_step',
-                    default=6,
+                    default=2,
                     type=int,
                     metavar='N',
                     help='snn simulation time steps (default: 6)')
 parser.add_argument('--workers',
-                    default=16,
+                    default=0,
                     type=int,
                     metavar='N',
                     help='number of data loading workers (default: 16)')
 parser.add_argument('--epochs',
-                    default=250,
+                    default=150,
                     type=int,
                     metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--weight_decay',
+                    default=0.00015,
                     type=float,
                     metavar='N',
                     help='weight_decay')
@@ -111,31 +113,31 @@ def train(model, device, train_loader, criterion, optimizer, epoch, args):
 
     for  i,(images, targets) in enumerate(train_loader):
         optimizer.zero_grad()
-        if args.DS in ['cifar10', 'cifar100']:
-            print('cifar')
-            targets = targets.to(device)
-            images = images.to(device)
-            if args.beta > 0 and r < args.cutmix_prob:
-                lam = np.random.beta(args.beta, args.beta)
-                rand_index = torch.randperm(images.size()[0]).cuda()
-                target_a = targets
-                target_b = targets[rand_index]
-                bbx1, bby1, bbx2, bby2 = rand_bbox(images.size(), lam)
-                images[:, :, bbx1:bbx2, bby1:bby2] = images[rand_index, :, bbx1:bbx2, bby1:bby2]
-                    # adjust lambda to exactly match pixel ratio
-                lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (images.size()[-1] * images.size()[-2]))
-                    # compute output
-                outputs = model(images)
-                mean_out = outputs.mean(1)
-                loss = criterion(mean_out, target_a) * lam + criterion(mean_out,target_b) * (1. - lam)
-            else:
-                # compute output
-                outputs = model(images)
-                mean_out = outputs.mean(1)
-                loss = criterion(mean_out, targets)
+        # if args.DS in ['cifar10', 'cifar100']:
+        #     print('cifar')
+        #     targets = targets.to(device)
+        #     images = images.to(device)
+        #     if args.beta > 0 and r < args.cutmix_prob:
+        #         lam = np.random.beta(args.beta, args.beta)
+        #         rand_index = torch.randperm(images.size()[0]).cuda()
+        #         target_a = targets
+        #         target_b = targets[rand_index]
+        #         bbx1, bby1, bbx2, bby2 = rand_bbox(images.size(), lam)
+        #         images[:, :, bbx1:bbx2, bby1:bby2] = images[rand_index, :, bbx1:bbx2, bby1:bby2]
+        #             # adjust lambda to exactly match pixel ratio
+        #         lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (images.size()[-1] * images.size()[-2]))
+        #             # compute output
+        #         outputs = model(images)
+        #         mean_out = outputs.mean(1)
+        #         loss = criterion(mean_out, target_a) * lam + criterion(mean_out,target_b) * (1. - lam)
+        #     else:
+        #         # compute output
+        #         outputs = model(images)
+        #         mean_out = outputs.mean(1)
+        #         loss = criterion(mean_out, targets)
 #-----------------------------------------------------------------------------------------------------------------------
-        elif args.DS == 'dvs_cifar10':
-            print('dvs_cifar10')
+        if args.DS in ['dvs_cifar10', 'dvs_gesture']:
+            #print('dvs_cifar10')
             images, target = images.to(device,non_blocking=True), targets.to(device,non_blocking=True)
             images = images.float()  
             N,T,C,H,W = images.shape
@@ -168,17 +170,17 @@ def test(model, test_loader, device):
     model.eval()
 
     for batch_idx, (inputs, targets) in enumerate(test_loader):
-        if args.DS in ['cifar10', 'cifar100']:
-            print('cifar')
-            inputs = inputs.to(device)
-            outputs = model(inputs)
-            mean_out = outputs.mean(1)
-            _, predicted = mean_out.cpu().max(1)
-            total += float(targets.size(0))
-            correct += float(predicted.eq(targets).sum().item())
+        # if args.DS in ['cifar10', 'cifar100']:
+        #     print('cifar')
+        #     inputs = inputs.to(device)
+        #     outputs = model(inputs)
+        #     mean_out = outputs.mean(1)
+        #     _, predicted = mean_out.cpu().max(1)
+        #     total += float(targets.size(0))
+        #     correct += float(predicted.eq(targets).sum().item())
             
-        elif args.DS == 'dvs_cifar10':
-            print('dvs_cifar10')
+        if args.DS in ['dvs_cifar10', 'dvs_gesture']:
+            #print('dvs_cifar10')
             inputs = inputs.to(device, non_blocking=True)
             target = targets.to(device, non_blocking=True)
             N,T,C,H,W = inputs.shape
@@ -197,18 +199,27 @@ if __name__ == '__main__':
 
     seed_all(args.seed)
 
-    if args.DS == 'cifar10':
-        print('cifar10')
-        num_CLS = 10
-        save_ds_name = 'CIFAR10'
-        train_dataset, val_dataset = build_cifar(use_cifar10=True)
+    # if args.DS == 'cifar10':
+    #     print('cifar10')
+    #     num_CLS = 10
+    #     save_ds_name = 'CIFAR10'
+    #     train_dataset, val_dataset = build_cifar(use_cifar10=True)
     
-    elif args.DS == 'cifar100': 
-        print('cifar100')
-        num_CLS = 100
-        save_ds_name = 'CIFAR100'
-        train_dataset, val_dataset = build_cifar(use_cifar10=False)
-    
+    # elif args.DS == 'cifar100': 
+    #     print('cifar100')
+    #     num_CLS = 100
+    #     save_ds_name = 'CIFAR100'
+    #     train_dataset, val_dataset = build_cifar(use_cifar10=False)
+    if args.DS == 'dvs_gesture':
+        print('dvs_gesture')
+        num_CLS = 11
+        save_ds_name = 'dvs_gesture'
+        train_dataset = dvs128_gesture.DVS128Gesture(root='./dataset/DVS_Gesture', train=True, data_type='frame', frames_number=args.time_step,
+                                                     split_by='number')
+        val_dataset = dvs128_gesture.DVS128Gesture(root='./dataset/DVS_Gesture', train=False, data_type='frame', frames_number=args.time_step,
+                                                    split_by='number')
+
+
     elif args.DS == 'dvs_cifar10':
         print('dvs_cifar10')
         num_CLS = 10
@@ -216,17 +227,21 @@ if __name__ == '__main__':
         origin_set = cifar10_dvs.CIFAR10DVS(root="./dvs_cifar10_data", data_type='frame', frames_number=args.time_step, split_by='number')
         train_dataset, val_dataset = split_to_train_test_set(0.9, origin_set, 10)    
         
-    if args.DS == 'cifar10':
-        print('cifar10')
-        DP_model = dta_msresnet18(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA_ON, dvs=False) 
+    # if args.DS == 'cifar10':
+    #     print('cifar10')
+    #     DP_model = dta_msresnet18(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA_ON, dvs=False) 
     
-    elif args.DS == 'cifar100':
-        print('cifar100')
-        DP_model = dta_msresnet18(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA_ON, dvs=False) 
+    # elif args.DS == 'cifar100':
+    #     print('cifar100')
+    #     DP_model = dta_msresnet18(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA_ON, dvs=False) 
     
+    if args.DS == 'dvs_gesture':
+        print('dvs_gesture')
+        DP_model = dta_msresnet18(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True) 
+
     elif args.DS == 'dvs_cifar10':
         print('dvs_cifar10')
-        DP_model = dta_msresnet18(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA_ON, dvs=True) 
+        DP_model = dta_msresnet18(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True) 
         
     DP_model = torch.nn.DataParallel(DP_model).to(device)
 
