@@ -214,9 +214,9 @@ if __name__ == '__main__':
         print('dvs_gesture')
         num_CLS = 11
         save_ds_name = 'dvs_gesture'
-        train_dataset = dvs128_gesture.DVS128Gesture(root='/kaggle/working/DA-SNN/test-dvs128/DVS_Gesture', train=True, data_type='frame', frames_number=args.time_step,
+        train_dataset = dvs128_gesture.DVS128Gesture(root='/kaggle/working/DA-SNN/test-dvs128/', train=True, data_type='frame', frames_number=args.time_step,
                                                      split_by='number')
-        val_dataset = dvs128_gesture.DVS128Gesture(root='/kaggle/working/DA-SNN/test-dvs128/DVS_Gesture', train=False, data_type='frame', frames_number=args.time_step,
+        val_dataset = dvs128_gesture.DVS128Gesture(root='/kaggle/working/DA-SNN/test-dvs128/', train=False, data_type='frame', frames_number=args.time_step,
                                                     split_by='number')
 
 
