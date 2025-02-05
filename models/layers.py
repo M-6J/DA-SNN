@@ -50,6 +50,43 @@ class BasicBlock_MS(nn.Module):
         
         return out
     
+class BasicBlock_SEW(nn.Module):
+    expansion = 1
+
+    def __init__(self, inplanes, planes, stride=1, downsample=None, groups=1,
+                 base_width=32, dilation=1, norm_layer=None):
+        super(BasicBlock_SEW, self).__init__()
+        if norm_layer is None:
+            norm_layer = tdBatchNorm
+        if groups != 1 or base_width != 32:
+            raise ValueError('BasicBlock only supports groups=1 and base_width=64')
+        if dilation > 1:
+            raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
+        # Both self.conv1 and self.downsample layers downsample the input when stride != 1
+        self.conv1 = conv3x3(inplanes, planes, stride)
+        self.bn1 = norm_layer(planes)
+        self.conv2 = conv3x3(planes, planes)
+        self.bn2 = norm_layer(planes)
+        self.downsample = downsample
+        self.stride = stride
+
+        self.conv1_s = tdLayer(self.conv1, self.bn1)
+        self.conv2_s = tdLayer(self.conv2, self.bn2)
+        self.spike = LIFSpike()
+        
+    def forward(self, x): # conv-bn-spike
+        identity = x
+        out = self.conv1_s(x)
+        out = self.spike(out)
+        out = self.conv2_s(out)
+        out = self.spike(out)
+        
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        out += identity
+        
+        return out
+    
 class SeqToANNContainer(nn.Module):
     # This code is form spikingjelly https://github.com/fangwei123456/spikingjelly
     def __init__(self, *args):
@@ -61,9 +98,7 @@ class SeqToANNContainer(nn.Module):
 
     def forward(self, x_seq: torch.Tensor):
         y_shape = [x_seq.shape[0], x_seq.shape[1]]
-        print(x_seq.shape)
         y_seq = self.module(x_seq.flatten(0, 1).contiguous())
-        print("1+",y_seq.shape)
         y_shape.extend(y_seq.shape[1:])
         return y_seq.view(y_shape)
 

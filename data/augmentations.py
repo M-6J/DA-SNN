@@ -6,6 +6,7 @@ from timm.data.mixup import Mixup
 from torch import Tensor
 from typing import List, Tuple, Optional, Dict
 from torchvision.transforms import functional as F, InterpolationMode
+import random
 
 def rand_bbox(size, lam):
     W = size[2]
@@ -24,24 +25,35 @@ def rand_bbox(size, lam):
 
     return bbx1, bby1, bbx2, bby2
 
-def get_train_aug():
-    return transforms.Compose([
-        transforms.Resize(size=(48, 48)),
-        transforms.RandomHorizontalFlip(p=0.5),
-    ])
+def get_train_aug(args):
+    if args.DS == 'dvs_cifar10':
+        return transforms.Compose([
+            transforms.Resize(size=(48, 48)),
+            transforms.RandomHorizontalFlip(p=0.5),
+        ])
+    elif args.DS == 'dvs_gesture':
+        return transforms.Compose([
+            transforms.Resize(size=(32, 32)),
+            transforms.RandomHorizontalFlip(p=0.5),
+        ])
 
-def get_test_aug():
-    return transforms.Compose([
-        transforms.Resize(size=(48, 48)),
-    ])
+def get_test_aug(args):
+    if args.DS == 'dvs_cifar10':
+        return transforms.Compose([
+            transforms.Resize(size=(48, 48)),
+        ])
+    elif args.DS == 'dvs_gesture':
+        return transforms.Compose([
+            transforms.Resize(size=(32, 32)),
+        ])
 
 def get_trival_aug():
     return SNNAugmentWide()
 
-def get_mixup_fn(args):
+def get_mixup_fn(args, num_classes: int):
     mixup_args = dict(
         mixup_alpha=args.mixup, prob=args.mixup_prob, switch_prob=args.mixup_switch_prob, 
-        mode=args.mixup_mode, label_smoothing=args.smoothing, num_classes=10)
+        mode=args.mixup_mode, label_smoothing=args.smoothing, num_classes=num_classes)
     return Mixup(**mixup_args)
 
 class SNNAugmentWide(torch.nn.Module):
@@ -156,3 +168,47 @@ def _apply_op(img: Tensor, op_name: str, magnitude: float,
         raise ValueError("The provided operator {} is not recognized.".format(op_name))
     return img
 
+class DVSTransform:
+    def __init__(self, c, d, e, n):
+        self.c = c
+        self.d = d
+        self.e = e
+        self.n = n
+
+    def __call__(self, img):
+        # T C H W
+        w = img.shape[-1]
+        img = torch.Tensor(img.astype(np.float32))
+
+        if random.random() > 0.5:
+            img = F.hflip(img)
+
+        # 1
+        a = int(random.uniform(-self.c, self.c))
+        b = int(random.uniform(-self.c, self.c))
+        img = torch.roll(img, shifts=(a, b), dims=(1, 2))
+
+        # 2
+        mask = 0
+        length = random.uniform(1, self.e)
+        height = random.uniform(1, self.e)
+        center_x = random.uniform(0, w)
+        center_y = random.uniform(0, w)
+
+        small_y = int(center_y - height / 2)
+        big_y = int(center_y + height / 2)
+        small_x = int(center_x - length / 2)
+        big_x = int(center_x + length / 2)
+
+        if small_y < 0:
+            small_y = 0
+        if small_x < 0:
+            small_x = 0
+        if big_y > w:
+            big_y = w
+        if big_x > w:
+            big_x = w
+
+        img[:, :, small_y:big_y, small_x:big_x] = mask
+
+        return img
