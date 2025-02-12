@@ -4,6 +4,24 @@ from spikingjelly.activation_based.neuron import ParametricLIFNode
 from spikingjelly.clock_driven import layer
 from models.DTA import DTA
 
+def conv3x3(in_channels, out_channels):
+    return nn.Sequential(
+        layer.SeqToANNContainer(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, stride=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+        ),
+        ParametricLIFNode(init_tau=2.0, detach_reset=True, step_mode='m')
+    )
+
+def conv1x1(in_channels, out_channels):
+    return nn.Sequential(
+        layer.SeqToANNContainer(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+        ),
+        ParametricLIFNode(init_tau=2.0, detach_reset=True, step_mode='m')
+    )
+
 def ms_conv3x3(in_channels, out_channels):
     return nn.Sequential(
         ParametricLIFNode(init_tau=2.0, detach_reset=True, step_mode='m'),
@@ -52,8 +70,22 @@ class MSBlock(nn.Module):
         out += x
         return out
 
+class SEWBlock(nn.Module):
+    def __init__(self, in_channels, mid_channels, connect_f=None):
+        super(SEWBlock, self).__init__()
+        self.connect_f = connect_f
+        self.conv = nn.Sequential(
+            conv3x3(in_channels, mid_channels),
+            conv3x3(mid_channels, in_channels),
+        )
+
+    def forward(self, x: torch.Tensor):
+        out = self.conv(x)
+        out += x
+        return out
+
 class ResNetN(nn.Module):
-    def __init__(self, layer_list, num_classes, DTA_ON=True, ms=True):
+    def __init__(self, layer_list, num_classes, time_step=20, DTA_ON=True, ms=True):
         super(ResNetN, self).__init__()
         in_channels = 2
         conv = []
@@ -61,7 +93,7 @@ class ResNetN(nn.Module):
         self.use_dta = DTA_ON
         print('ms = ', self.use_ms)
         print('DTA = ', self.use_dta)
-        self.T = 5
+        self.T = time_step
 
         if self.use_dta==True:
             self.encoding = DTA(T=self.T , out_channels = 32)
@@ -69,8 +101,12 @@ class ResNetN(nn.Module):
             self.encoding = None
 
         self.input_conv = ms_input_conv3x3(in_channels, 32)
+        print(in_channels)
 
-        self.LIF = nn.Sequential(ParametricLIFNode(init_tau=2.0, detach_reset=True, step_mode='m'))
+        self.LIF = ParametricLIFNode(init_tau=2.0, detach_reset=True, step_mode='m')
+        self.avgpool = layer.SeqToANNContainer(nn.AdaptiveAvgPool2d((1, 1)))
+        self.mp2 = layer.SeqToANNContainer(nn.MaxPool2d(2, 2))
+        self.maxpool = layer.SeqToANNContainer(nn.AdaptiveMaxPool2d((1, 1)))
 
         for cfg_dict in layer_list:
             channels = cfg_dict['channels']
@@ -87,7 +123,10 @@ class ResNetN(nn.Module):
                 num_blocks = cfg_dict['num_blocks']
                 if cfg_dict['block_type'] == 'ms':
                     for _ in range(num_blocks):
-                        conv.append(MSBlock(in_channels, mid_channels))        
+                        conv.append(MSBlock(in_channels, mid_channels))   
+                elif cfg_dict['block_type'] == 'sew':
+                    for _ in range(num_blocks):
+                        conv.append(SEWBlock(in_channels, mid_channels))         
                 else:
                     raise NotImplementedError
 
@@ -112,17 +151,16 @@ class ResNetN(nn.Module):
         x = x.permute(1, 0, 2, 3, 4)  # [T, N, 2, *, *] torch.Size([5, 16, 2, 128, 128])
         if self.use_ms is True:
             x = self.input_conv(x)
-            #print(x.shape) # torch.Size([5, 16, 32, 128, 128])
             img = x
-            #print(x.shape) # torch.Size([5, 16, 32, 128, 128])
-            x = self.encoding(img,x) #attention
-            #print(x.shape) # torch.Size([5, 16, 32, 128, 128])
-            x = self.conv(x)
-            #print(x.shape) # torch.Size([5, 16, 32, 1, 1])
             x = self.LIF(x)
-            #print(x.shape) #torch.Size([5, 16, 32, 1, 1])
+            x = self.encoding(img,x) #attention
+            x = self.mp2(x)
+            x = self.conv(x)
+            #x = self.encoding(x)
+            #x = self.LIF(x)
+            #x = self.avgpool(x)
+            x = self.maxpool(x)
             x = x.flatten(2)
-            #print(x.shape) #torch.Size([5, 16, 32])
         else:
             x = self.conv(x)
             x = x.flatten(2)
@@ -137,9 +175,24 @@ def MSResNet(*args, **kwargs):
         {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'ms', 'k_pool': 2},
         {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'ms', 'k_pool': 2},
         {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'ms', 'k_pool': 2},
-        {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'ms', 'k_pool': 2},
+        {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'ms'},#, 'k_pool': 2},
     ]
     num_classes = 11
     model = 'ms'
-    return ResNetN(layer_list, num_classes, DTA_ON=True, ms=True)
+    time_step = 5
+    return ResNetN(layer_list, num_classes, time_step, DTA_ON=True, ms=True)
+
+def SEWResNet(*args, **kwargs):
+    layer_list = [
+        {'channels': 32, 'up_kernel_size': 3, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'sew', 'k_pool': 2},  # 64x64 
+        {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'sew', 'k_pool': 2},  # 32x32 
+        {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'sew', 'k_pool': 2},  # 16x16 
+        {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'sew', 'k_pool': 2}, # 8x8 
+        {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'sew', 'k_pool': 2}, # 4x4 
+        {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'sew', 'k_pool': 2}, # 2x2 
+        {'channels': 32, 'up_kernel_size': 1, 'mid_channels': 32, 'num_blocks': 1, 'block_type': 'sew'},#, 'k_pool': 2}, # 1x1 
+    ]
+    num_classes = 11
+    time_step = 5
+    return ResNetN(layer_list, num_classes, time_step, DTA_ON=True, ms=True)
 

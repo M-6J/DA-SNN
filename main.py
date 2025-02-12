@@ -3,8 +3,8 @@ import os
 import torch.nn.parallel
 import torch.optim
 from models.DTA_SNN import *
-from models.SEW_ResNet import * ### 32-7B-ResNet
-from models.MS_ResNet import * ### ResNet-18-32input
+#from models.SEW_ResNet import * ### 32-7B-ResNet
+#from models.MS_ResNet import * ### ResNet-18-32input
 from data.augmentations import *
 from data.loaders import build_cifar
 from utils.utils import *
@@ -20,7 +20,7 @@ parser = argparse.ArgumentParser(description='Dual Temporal-channel-wise Attenti
 
 
 parser.add_argument('--DTA',
-                    default=False,
+                    default=True,
                     type=bool,
                     help='using DTA')
 parser.add_argument('--DS',
@@ -59,15 +59,20 @@ parser.add_argument('--time_step',
                     metavar='N',
                     help='snn simulation time steps (default: 6)')
 parser.add_argument('--workers',
-                    default=0,
+                    default=20,
                     type=int,
                     metavar='N',
                     help='number of data loading workers (default: 16)')
 parser.add_argument('--epochs',
-                    default=200,
+                    default=150,
                     type=int,
                     metavar='N',
                     help='number of total epochs to run')
+parser.add_argument('--dvs_aug',
+                    default=False,
+                    type=bool,
+                    metavar='N',
+                    help='augmentation for dvs data')
 parser.add_argument('--weight_decay',
                     default=0.00015,
                     type=float,
@@ -105,7 +110,7 @@ args = parser.parse_args()
 
 
 
-def train(model, device, train_loader, criterion, optimizer, epoch, args):
+def train(model, device, train_loader, criterion, optimizer, epoch, dvs_aug, args):
     running_loss = 0
     model.train()
     M = len(train_loader)
@@ -137,6 +142,8 @@ def train(model, device, train_loader, criterion, optimizer, epoch, args):
             images, targets = images.to(device, non_blocking=True), targets.to(device, non_blocking=True)
             images = images.float()
             N, T, C, H, W = images.shape
+            if dvs_aug is not None:
+                images = dvs_aug(images)
             outputs = model(images)  # [batch_size, num_classes] = [16, 11]
             loss = criterion(outputs, targets)  # mean_out 제거
 
@@ -230,6 +237,8 @@ if __name__ == '__main__':
 
     seed_all(args.seed)
 
+    T = args.time_step
+
     if args.DS == 'dvs_gesture':
         print('dvs_gesture')
         num_CLS = 11
@@ -252,11 +261,16 @@ if __name__ == '__main__':
     if args.DS == 'dvs_gesture':
         print('dvs_gesture')
         if args.model == 'MSResNet':
-            from models.gesture import *
-            DP_model = MSResNet()
+            #from models.gesture import *
+            from models.MS_ResNet import *
+            DP_model = dta_msresnet(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True)
         elif args.model == 'SEWResNet':
-            DP_model = SEWResNet("ADD")
+            #from models.gesture import *
+            #from models.MS_ResNet import *
+            from models.SEW_ResNet_moe import *
+            DP_model = dta_sewresnet_moe(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True)
         elif args.model == 'SpikingResNet':
+            from models.SEW_ResNet import *
             DP_model = SpikingResNet()
     
     # # ResNet-18-32input
@@ -280,20 +294,26 @@ if __name__ == '__main__':
     optimizer = torch.optim.Adam(DP_model.parameters(),lr=args.learning_rate,weight_decay=args.weight_decay) #빠른수렴
     #optimizer = torch.optim.AdamW(DP_model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay) #빠른수렴 + L2정규화
     scheduler =  torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, eta_min=0, T_max=args.epochs)
-    #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1) #step_size는 일반적으로 총 epoch의 1/3 또는 1/2
+    #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=64, gamma=0.1) #step_size는 일반적으로 총 epoch의 1/3 또는 1/2
 
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
                                                num_workers=args.workers, pin_memory=True)
     test_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size,
                                               shuffle=False, num_workers=args.workers, pin_memory=True)
     
-    logger = get_logger(f'{save_ds_name}-{args.model}-S{args.seed}-B{args.batch_size}-T{args.time_step}-E{args.epochs}-LR{args.learning_rate}.log')
+    logger = get_logger(f'{save_ds_name}-{args.model}-test_sew_moe_router_32C_Conv3D-S{args.seed}-B{args.batch_size}-T{args.time_step}-E{args.epochs}-LR{args.learning_rate}.log')
     logger.info('start training!')
+
+    # if args.dvs_aug == True:
+    #     dvs_aug = Cutout(n_holes=1, length=16)
+    # else:
+    #     dvs_aug = None
+    dvs_aug = None
 
     best_acc = 0
     best_epoch = 0
     for epoch in range(args.epochs):
-        loss, acc = train(DP_model, device, train_loader, criterion, optimizer, epoch, args)
+        loss, acc = train(DP_model, device, train_loader, criterion, optimizer, epoch, dvs_aug, args)
         logger.info('Epoch:[{}/{}]\t loss={:.5f}\t acc={:.3f}'.format(epoch +1, args.epochs, loss, acc ))
         scheduler.step()
         facc = test(DP_model, test_loader, device)
@@ -302,7 +322,7 @@ if __name__ == '__main__':
         if best_acc < facc:
             best_acc = facc
             best_epoch = epoch + 1
-            torch.save(DP_model.module.state_dict(), f'{save_ds_name}-{args.model}-S{args.seed}-B{args.batch_size}-T{args.time_step}-E{args.epochs}-LR{args.learning_rate}.pth.tar')
+            torch.save(DP_model.module.state_dict(), f'{save_ds_name}-{args.model}-test_sew_moe_router_32C_Conv3D-S{args.seed}-B{args.batch_size}-T{args.time_step}-E{args.epochs}-LR{args.learning_rate}.pth.tar')
 
         logger.info('Epoch:[{}/{}]\t Best Test acc={:.3f}'.format(best_epoch, args.epochs, best_acc ))
         logger.info('\n')

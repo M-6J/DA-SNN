@@ -9,7 +9,7 @@ from models.gesture import *
 model = MSResNet()
 
 # 저장된 가중치 로드
-#model.load_state_dict(torch.load("D:\DA-SNN\wan_dvs_gesture-SEWResNet-S42-B16-T5-E150-LR0.001.pth.tar", map_location=torch.device("cpu")))
+model.load_state_dict(torch.load("D:\DA-SNN\wan_TCJA_C3x3_avgpool_dvs_gesture-MSResNet-S42-B16-T5-E150-LR0.001.pth.tar", map_location=torch.device("cpu")))
 
 # 전체 네트워크 출력
 print(model)

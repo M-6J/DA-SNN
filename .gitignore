@@ -5,12 +5,12 @@ __pycache__
 
 cifar_data/*
 dvs_cifar10_data/*
-
+*.zip
 *.pth
 *.log
 *pth.tar
 *.tar
-
+tcja_test/*
 
 
 

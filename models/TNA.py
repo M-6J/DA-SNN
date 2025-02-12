@@ -32,11 +32,15 @@ class TCA(nn.Module):
         dd_k = kernel_size // dilation + ((kernel_size // dilation) % 2 - 1) 
         dd_p = (dilation * (dd_k - 1) // 2) 
         self.LTCA = nn.Sequential(
-            nn.Conv2d(dim, dim, d_k, padding=d_p, groups=dim),
-            nn.Conv2d(
-            dim, dim, dd_k, stride=1, padding=dd_p, groups=dim, dilation=dilation),
-            nn.Conv2d(dim, dim, 1)
+            nn.Conv2d(dim, dim, kernel_size=d_k, padding=d_p, groups=dim//4),  # Grouped Conv 적용
+            nn.Conv2d(dim, dim, kernel_size=dd_k, stride=1, padding=dd_p, groups=dim//4, dilation=dilation),  # Dilated Conv
+            nn.Conv2d(dim, dim, kernel_size=1)  # Pointwise Conv
         )
+        # self.LTCA = nn.Sequential(
+        #     nn.Conv2d(dim, dim, d_k, padding=d_p, groups=dim),
+        #     nn.Conv2d(dim, dim, dd_k, stride=1, padding=dd_p, groups=dim, dilation=dilation),
+        #     nn.Conv2d(dim, dim, 1)
+        # )
         self.reduction = max(dim // reduction, 4) 
         self.GAP = nn.AdaptiveAvgPool2d(1)
         self.MLP_block = nn.Sequential(
