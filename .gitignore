@@ -5,13 +5,14 @@ __pycache__
 
 cifar_data/*
 dvs_cifar10_data/*
-*.zip
+tcja_test/*
 *.pth
 *.log
 *pth.tar
 *.tar
-tcja_test/*
-
+T16
+tcja_test
+*.zip
 
 
 # Byte-compiled / optimized / DLL files

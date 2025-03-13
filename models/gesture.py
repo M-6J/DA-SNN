@@ -3,6 +3,26 @@ import torch.nn as nn
 from spikingjelly.activation_based.neuron import ParametricLIFNode
 from spikingjelly.clock_driven import layer
 from models.DTA import DTA
+from models.GAU import TA,SCA
+
+class GAC(nn.Module):
+    def __init__(self,T,out_channels):
+        super().__init__()
+        self.TA = TA(T = T)
+        self.SCA = SCA(in_planes= out_channels,kerenel_size=4)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x_seq, spikes):
+        # x_seq B T inplanes H W
+        # spikes B T inplanes H W
+        x_seq = x_seq.permute(1, 0, 2, 3, 4)
+        spikes = spikes.permute(1, 0, 2, 3, 4)
+
+        TA = self.TA(x_seq)
+        SCA = self.SCA(x_seq)
+        out = self.sigmoid(TA * SCA)
+        y_seq = out * spikes
+        return y_seq.permute(1, 0, 2, 3, 4)
 
 def conv3x3(in_channels, out_channels):
     return nn.Sequential(
@@ -96,7 +116,8 @@ class ResNetN(nn.Module):
         self.T = time_step
 
         if self.use_dta==True:
-            self.encoding = DTA(T=self.T , out_channels = 32)
+            #self.encoding = DTA(T=self.T , out_channels = 32)
+            self.encoding = GAC(T=self.T , out_channels = 32)
         else: 
             self.encoding = None
 
@@ -154,7 +175,7 @@ class ResNetN(nn.Module):
             img = x
             x = self.LIF(x)
             x = self.encoding(img,x) #attention
-            x = self.mp2(x)
+            x = mp2(x)
             x = self.conv(x)
             #x = self.encoding(x)
             #x = self.LIF(x)

@@ -28,7 +28,7 @@ def rand_bbox(size, lam):
 def get_train_aug(args):
     if args.DS == 'dvs_cifar10':
         return transforms.Compose([
-            transforms.Resize(size=(48, 48)),
+            transforms.Resize(size=(64, 64)),
             transforms.RandomHorizontalFlip(p=0.5),
         ])
     elif args.DS == 'dvs_gesture':
@@ -40,7 +40,7 @@ def get_train_aug(args):
 def get_test_aug(args):
     if args.DS == 'dvs_cifar10':
         return transforms.Compose([
-            transforms.Resize(size=(48, 48)),
+            transforms.Resize(size=(64, 64)),
         ])
     elif args.DS == 'dvs_gesture':
         return transforms.Compose([
@@ -210,5 +210,46 @@ class DVSTransform:
             big_x = w
 
         img[:, :, small_y:big_y, small_x:big_x] = mask
+
+        return img
+
+
+class Cutout:
+    """Randomly mask out one or more patches from an image.
+    Altered from https://github.com/uoguelph-mlrg/Cutout/blob/master/util/cutout.py
+    Args:
+    n_holes (int): Number of patches to cut out of each image.
+    length (int): The length (in pixels) of each square patch.
+    """
+
+    def __init__(self, n_holes, length):
+        self.n_holes = n_holes
+        self.length = length
+
+    def __call__(self, img):
+        """
+        Args:
+        img (Tensor): Tensor image of size (C, H, W).
+        Returns:
+        Tensor: Image with n_holes of dimension length x length cut out of it.
+        """
+        h = img.size(-2)
+        w = img.size(-1)
+
+        mask = torch.ones((h, w)).type_as(img)
+
+        for _ in range(self.n_holes):
+            y = np.random.randint(h)
+            x = np.random.randint(w)
+
+            y1 = np.clip(y - self.length // 2, 0, h)
+            y2 = np.clip(y + self.length // 2, 0, h)
+            x1 = np.clip(x - self.length // 2, 0, w)
+            x2 = np.clip(x + self.length // 2, 0, w)
+
+            mask[y1:y2, x1:x2] = 0.0
+
+            mask = mask.expand_as(img)
+            img = img * mask
 
         return img

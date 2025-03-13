@@ -36,6 +36,7 @@ class TCA(nn.Module):
             nn.Conv2d(dim, dim, kernel_size=dd_k, stride=1, padding=dd_p, groups=dim//4, dilation=dilation),  # Dilated Conv
             nn.Conv2d(dim, dim, kernel_size=1)  # Pointwise Conv
         )
+        #origin DWConv
         # self.LTCA = nn.Sequential(
         #     nn.Conv2d(dim, dim, d_k, padding=d_p, groups=dim),
         #     nn.Conv2d(dim, dim, dd_k, stride=1, padding=dd_p, groups=dim, dilation=dilation),

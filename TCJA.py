@@ -91,7 +91,7 @@ class CextNet(nn.Module):  # TODO: kernel_size parameter passing
         conv = []
 
         conv.extend(CextNet.conv3x3(2, channels))
-        conv.append(layer.SeqToANNContainer(nn.MaxPool2d(2, 2)))
+        #conv.append(layer.SeqToANNContainer(nn.MaxPool2d(2, 2)))
 
         conv.extend(CextNet.conv3x3(channels, channels))
         conv.append(layer.SeqToANNContainer(nn.MaxPool2d(2, 2)))
@@ -99,9 +99,9 @@ class CextNet(nn.Module):  # TODO: kernel_size parameter passing
         conv.extend(CextNet.conv3x3(channels, channels))
         conv.append(layer.SeqToANNContainer(nn.MaxPool2d(2, 2)))
 
-        for i in range(2):
+        for i in range(3):
             conv.extend(CextNet.conv3x3(channels, channels))  # TODO: kernel size must be equal
-            conv.append(TCJA(4, 4, 20, 128))
+            #conv.append(TCJA(4, 4, 20, 128))
             conv.append(layer.SeqToANNContainer(nn.MaxPool2d(2, 2)))
 
         self.conv = nn.Sequential(*conv)
@@ -109,12 +109,12 @@ class CextNet(nn.Module):  # TODO: kernel_size parameter passing
             nn.Flatten(2),
             layer.MultiStepDropout(0.5),
             layer.SeqToANNContainer(nn.Linear(channels * 4 * 4, channels * 2 * 2, bias=False)),
-            neuron.MultiStepLIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True),
-                                    #backend='cupy'),
+            neuron.MultiStepLIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True, backend='cupy'),
             layer.MultiStepDropout(0.5),
             layer.SeqToANNContainer(nn.Linear(channels * 2 * 2, 110, bias=False)),
-            neuron.MultiStepLIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)#, backend='cupy')
-        )
+            neuron.MultiStepLIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True, backend='cupy')
+            )
+        
         self.vote = VotingLayer(10)
 
     def forward(self, x: torch.Tensor):
@@ -129,10 +129,16 @@ class CextNet(nn.Module):  # TODO: kernel_size parameter passing
                 nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
                 nn.BatchNorm2d(out_channels)
             ),
-            neuron.MultiStepLIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True)#,
-                                    #backend='cupy'),
+            neuron.MultiStepLIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True, backend='cupy'),
         ]
-
+    def input_conv(in_channels: int, out_channels):
+        return [
+            layer.SeqToANNContainer(
+                nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(out_channels)
+            ),
+            neuron.MultiStepLIFNode(tau=2.0, surrogate_function=surrogate.ATan(), detach_reset=True, backend='cupy'),
+        ]
 
 def main():
     parser = argparse.ArgumentParser(description='Classify DVS128 Gesture')
@@ -161,8 +167,8 @@ def main():
     args = parser.parse_args()
     print(args)
 
-    #net = CextNet(channels=args.channels)
-    net = MSResNet()
+    net = CextNet(channels=args.channels)
+    #net = MSResNet()
     print(net)
 
     net.to(args.device)
@@ -219,7 +225,7 @@ def main():
         start_epoch = checkpoint['epoch'] + 1
         max_test_acc = checkpoint['max_test_acc']
 
-    out_dir = os.path.join(args.out_dir, f'T_{args.T}_b_{args.b}_c_{args.channels}_{args.opt}_lr_{args.lr}_max')
+    out_dir = os.path.join(args.out_dir, f'just_CextNet_T_{args.T}_b_{args.b}_c_{args.channels}_{args.opt}_lr_{args.lr}_max')
     if args.lr_scheduler == 'CosALR':
         out_dir += f'CosALR_{args.T_max}'
     elif args.lr_scheduler == 'StepLR':

@@ -81,7 +81,7 @@ class MS_ResNet(nn.Module):
         x = self.avgpool(x)
         x = torch.flatten(x, 2)
         x = self.fc(x)
-        return x
+        return x.mean(1)
 
     def forward(self, x):
         if self.dvs is True: 

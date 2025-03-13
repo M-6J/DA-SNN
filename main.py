@@ -2,7 +2,7 @@ import argparse
 import os
 import torch.nn.parallel
 import torch.optim
-from models.DTA_SNN import *
+#from models.DTA_SNN import *
 #from models.SEW_ResNet import * ### 32-7B-ResNet
 #from models.MS_ResNet import * ### ResNet-18-32input
 from data.augmentations import *
@@ -54,7 +54,7 @@ parser.add_argument('--seed',
                     help='seed for initializing training')
 
 parser.add_argument('--time_step',
-                    default=5,
+                    default=10,
                     type=int,
                     metavar='N',
                     help='snn simulation time steps (default: 6)')
@@ -64,7 +64,7 @@ parser.add_argument('--workers',
                     metavar='N',
                     help='number of data loading workers (default: 16)')
 parser.add_argument('--epochs',
-                    default=150,
+                    default=200,
                     type=int,
                     metavar='N',
                     help='number of total epochs to run')
@@ -74,7 +74,7 @@ parser.add_argument('--dvs_aug',
                     metavar='N',
                     help='augmentation for dvs data')
 parser.add_argument('--weight_decay',
-                    default=0.00015,
+                    default=0.00015, 
                     type=float,
                     metavar='N',
                     help='weight_decay')
@@ -106,6 +106,10 @@ parser.add_argument('--smoothing',
                     type=float, 
                     default=0.1,
                     help='Label smoothing (default: 0.1)')
+parser.add_argument('--lambda_cov', 
+                    type=float, 
+                    default=0.1, 
+                    help='Coefficient for auxiliary loss (if any).')
 args = parser.parse_args()
 
 
@@ -120,28 +124,41 @@ def train(model, device, train_loader, criterion, optimizer, epoch, dvs_aug, arg
 
     for  i,(images, targets) in enumerate(train_loader):
         optimizer.zero_grad()
-        if args.DS == 'dvs_cifar10':
+        if args.DS == 'dvs_cifar10': 
             #print('dvs_cifar10')
             images, target = images.to(device,non_blocking=True), targets.to(device,non_blocking=True)
             images = images.float()  
             N,T,C,H,W = images.shape
+            ###resize###
             train_aug = get_train_aug(args)
-            trival_aug = get_trival_aug()
-            mixup_fn = get_mixup_fn(args, num_CLS)
-            
             images = torch.stack([(train_aug(images[i])) for i in range(N)])
-            images = torch.stack([(trival_aug(images[i])) for i in range(N)])
-            images, target = mixup_fn(images, target)#############################################
-            targets = target.argmax(dim=-1)
+            ############
+            
+            # #밑에 s 붙이는거 기억###### aug 안하려면 주석 ##############
+            # trival_aug = get_trival_aug() #Autoaug  
+            # mixup_fn = get_mixup_fn(args, num_CLS) #mixup
+            # images = torch.stack([(trival_aug(images[i])) for i in range(N)])
+            # images, target = mixup_fn(images, target)
+            # targets = target.argmax(dim=-1)
+            # ############### aug 안하려면 주석 ##############
 
-            outputs = model(images)
-            mean_out = outputs.mean(1)
-            loss = criterion(mean_out, targets)
+            # outputs = model(images)
+            # loss = criterion(outputs, target) #aug 사용 시 target뒤에 s 추가
+            
+            #for moe v2
+            outputs, load_balance_loss = model(images)  # MoE 구조이므로 보조 손실 반환
+            loss = criterion(outputs, target) + args.lambda_cov * load_balance_loss
 
-        elif args.DS == 'dvs_gesture':
+        elif args.DS == 'dvs_gesture': 
             images, targets = images.to(device, non_blocking=True), targets.to(device, non_blocking=True)
             images = images.float()
             N, T, C, H, W = images.shape
+            
+            ###resize###
+            train_aug = get_train_aug(args)
+            images = torch.stack([(train_aug(images[i])) for i in range(N)])
+            ############
+            
             if dvs_aug is not None:
                 images = dvs_aug(images)
             outputs = model(images)  # [batch_size, num_classes] = [16, 11]
@@ -185,33 +202,42 @@ def test(model, test_loader, device):
     model.eval()
 
     for batch_idx, (inputs, targets) in enumerate(test_loader):
-        if args.DS == 'dvs_cifar10':
+        if args.DS == 'dvs_cifar10': 
             #print('dvs_cifar10')
             inputs = inputs.to(device, non_blocking=True)
             target = targets.to(device, non_blocking=True)
+            ###resize###
             N,T,C,H,W = inputs.shape
             test_aug = get_test_aug(args)
             inputs = torch.stack([(test_aug(inputs[i])) for i in range(N)])
+            ############
             inputs = inputs.float()
-            outputs = model(inputs)
-            mean_out = outputs.mean(1)
-            _, predicted = mean_out.cpu().max(1)
-            total += float(target.size(0))
-            correct += float(predicted.eq(target.cpu()).sum().item())
+            #outputs = model(inputs)
+            
+            #for moe v2
+            outputs, _ = model(inputs)
+            
+            #mean_out = outputs.mean(1)
+            # _, predicted = mean_out.cpu().max(1)
+            # total += float(target.size(0))
+            # correct += float(predicted.eq(target.cpu()).sum().item())
 
-        elif args.DS == 'dvs_gesture':
+        elif args.DS == 'dvs_gesture': 
             # print('dvs_gesture')
             inputs = inputs.to(device, non_blocking=True)
             target = targets.to(device, non_blocking=True)
-            
+            ###resize###
+            N,T,C,H,W = inputs.shape
+            test_aug = get_test_aug(args) 
+            inputs = torch.stack([(test_aug(inputs[i])) for i in range(N)])
+            ############
             inputs = inputs.float()
             outputs = model(inputs)  # [batch_size, num_classes] = [N, 11]
-            functional.reset_net(model)
 
-
-            _, predicted = outputs.cpu().max(1)  # mean_out 제거
-            total += float(target.size(0))
-            correct += float(predicted.eq(target.cpu()).sum().item())
+        functional.reset_net(model)
+        _, predicted = outputs.cpu().max(1)  # mean_out 제거
+        total += float(target.size(0))
+        correct += float(predicted.eq(target.cpu()).sum().item())
 
     final_acc = 100 * correct / total
     return final_acc
@@ -254,7 +280,7 @@ if __name__ == '__main__':
         print('dvs_cifar10')
         num_CLS = 10
         save_ds_name = 'DVSCIFAR10'
-        origin_set = cifar10_dvs.CIFAR10DVS(root="./dvs_cifar10_data", data_type='frame', frames_number=args.time_step, split_by='number')
+        origin_set = cifar10_dvs.CIFAR10DVS(root="./dataset/DVS_CIFAR10", data_type='frame', frames_number=args.time_step, split_by='number')
         train_dataset, val_dataset = split_to_train_test_set(0.9, origin_set, 10)    
     
     # 32-7B-ResNet
@@ -268,7 +294,7 @@ if __name__ == '__main__':
             #from models.gesture import *
             #from models.MS_ResNet import *
             from models.SEW_ResNet_moe import *
-            DP_model = dta_sewresnet_moe(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True)
+            DP_model = GA_sewresnet_moe(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True)
         elif args.model == 'SpikingResNet':
             from models.SEW_ResNet import *
             DP_model = SpikingResNet()
@@ -284,8 +310,14 @@ if __name__ == '__main__':
     #         DP_model = SpikingResNet()
 
     elif args.DS == 'dvs_cifar10':
+        from models.SEW_ResNet_moe import *
+        from models.DTA_SNN import *
         print('dvs_cifar10')
-        DP_model = dta_msresnet18(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True) 
+        print(num_CLS)
+        #DP_model = sewresnet_cifar(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True) 
+        #DP_model = sewresnet_ga_cifar(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True)
+        DP_model = sewresnet_ga_moe_cifar_v2(num_classes=num_CLS, time_step=args.time_step, DTA_ON=args.DTA, dvs=True)
+        
         
     DP_model = torch.nn.DataParallel(DP_model).to(device)
 
@@ -301,7 +333,7 @@ if __name__ == '__main__':
     test_loader = torch.utils.data.DataLoader(val_dataset, batch_size=args.batch_size,
                                               shuffle=False, num_workers=args.workers, pin_memory=True)
     
-    logger = get_logger(f'{save_ds_name}-{args.model}-test_sew_moe_router_32C_Conv3D-S{args.seed}-B{args.batch_size}-T{args.time_step}-E{args.epochs}-LR{args.learning_rate}.log')
+    logger = get_logger(f'{save_ds_name}-{args.model}-resize64x64_GA_MOE_fix1_tdfc_layer678_dropout1_15_2_25_experts_shared_fc_new_moe_v2_top1_noscale_noaug-S{args.seed}-B{args.batch_size}-T{args.time_step}-E{args.epochs}-LR{args.learning_rate}.log')
     logger.info('start training!')
 
     # if args.dvs_aug == True:
@@ -322,7 +354,7 @@ if __name__ == '__main__':
         if best_acc < facc:
             best_acc = facc
             best_epoch = epoch + 1
-            torch.save(DP_model.module.state_dict(), f'{save_ds_name}-{args.model}-test_sew_moe_router_32C_Conv3D-S{args.seed}-B{args.batch_size}-T{args.time_step}-E{args.epochs}-LR{args.learning_rate}.pth.tar')
+            torch.save(DP_model.module.state_dict(), f'{save_ds_name}-{args.model}-resize64x64_GA_MOE_fix1_tdfc_layer678_dropout1_15_2_25_experts_shared_fc_new_moe_v2_top1_noscale_noaug-S{args.seed}-B{args.batch_size}-T{args.time_step}-E{args.epochs}-LR{args.learning_rate}.pth.tar')
 
         logger.info('Epoch:[{}/{}]\t Best Test acc={:.3f}'.format(best_epoch, args.epochs, best_acc ))
         logger.info('\n')

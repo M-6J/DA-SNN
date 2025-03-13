@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from spikingjelly.activation_based.neuron import ParametricLIFNode
 
     
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
@@ -58,7 +58,7 @@ class BasicBlock_SEW(nn.Module):
         super(BasicBlock_SEW, self).__init__()
         if norm_layer is None:
             norm_layer = tdBatchNorm
-        if groups != 1 or base_width != 32:
+        if groups != 1 or base_width != 64:
             raise ValueError('BasicBlock only supports groups=1 and base_width=64')
         if dilation > 1:
             raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
@@ -73,6 +73,7 @@ class BasicBlock_SEW(nn.Module):
         self.conv1_s = tdLayer(self.conv1, self.bn1)
         self.conv2_s = tdLayer(self.conv2, self.bn2)
         self.spike = LIFSpike()
+        #self.spike = ParametricLIFNode(init_tau=2.0, detach_reset=True, step_mode='m')
         
     def forward(self, x): # conv-bn-spike
         identity = x
@@ -170,4 +171,31 @@ class tdBatchNorm(nn.Module):
         y = self.seqbn(x)
         return y
 
+class TEBN(nn.Module):
+    def __init__(self, num_features, eps=1e-5, momentum=0.1):
+        super(TEBN, self).__init__()
+        self.bn = nn.BatchNorm3d(num_features)
+        self.p = nn.Parameter(torch.ones(4, 1, 1, 1, 1, device=device))
 
+    def forward(self, input):
+        y = input.transpose(1, 2).contiguous()  # N T C H W ,  N C T H W
+        y = self.bn(y)
+        y = y.contiguous().transpose(1, 2)
+        y = y.transpose(0, 1).contiguous()  # NTCHW  TNCHW
+        y = y * self.p
+        y = y.contiguous().transpose(0, 1)  # TNCHW  NTCHW
+        return y
+
+
+class TEBNLayer(nn.Module):
+    def __init__(self, in_plane, out_plane, kernel_size, stride=1, padding=1):
+        super(TEBNLayer, self).__init__()
+        self.fwd = SeqToANNContainer(
+            nn.Conv2d(in_plane, out_plane, kernel_size, stride, padding),
+        )
+        self.bn = TEBN(out_plane)
+
+    def forward(self, input):
+        y = self.fwd(input)
+        y = self.bn(y)
+        return y
